@@ -1,0 +1,133 @@
+I'm afraid there isn't much you can do with this repetition.
+
+Rust does not have any kind of coercion. I don't think you could use trait objects, either.
+
+Here is my approach that is a bit more idiomatic.
+
+```rust
+use std::io::{self, Write};
+
+#[derive(Debug, Clone, Copy)]
+enum Literal {
+    Int(i32),
+    Float(f32),
+    Str(&'static str),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Instruction {
+    BinaryOp(Op),
+    Push(Literal),
+    Dsp,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Op {
+    Add,
+    Sub,
+    Mul,
+    Div,
+}
+
+struct Machine {
+    stack: Vec<Literal>,
+    code: Vec<Instruction>,
+    ip: usize,
+}
+
+impl Machine {
+    fn new(code: Vec<Instruction>) -> Machine {
+        Machine {
+            stack: Vec::new(),
+            code,
+            ip: 0,
+        }
+    }
+
+    fn add_instr(&mut self, instr: Instruction) {
+        self.code.push(instr);
+    }
+
+    fn push(&mut self, x: Literal) {
+        self.stack.push(x);
+    }
+
+    fn pop(&mut self) -> Literal {
+        self.stack.pop().expect("stack popped while empty")
+    }
+
+    fn execute(&mut self) {
+        while self.ip < self.code.len() {
+            let opcode = self.code[self.ip];
+            self.ip += 1;
+            self.dispatch(opcode);
+        }
+    }
+
+    fn dispatch(&mut self, opcode: Instruction) {
+        use Literal::*;
+
+        match opcode {
+            Instruction::Push(lit) => self.push(lit),
+            Instruction::BinaryOp(op) => {
+                let pair = (self.pop(), self.pop());
+                let coerced = match pair {
+                    (Int(x), Int(y)) => pair,
+                    (Float(x), Float(y)) => pair,
+                    (Int(x), Float(y)) => (Float(x as f32), Float(y)),
+                    (Float(x), Int(y)) => (Float(x), Float(y as f32)),
+                    _ => panic!("error in code-- expected int/float for binary operations"),
+                };
+                let result = match (op, coerced.0, coerced.1) {
+                    (Op::Add, Int(x), Int(y)) => Int(x + y),
+                    (Op::Add, Float(x), Float(y)) => Float(x + y),
+                    (Op::Sub, Int(x), Int(y)) => Int(x - y),
+                    (Op::Sub, Float(x), Float(y)) => Float(x - y),
+                    (Op::Mul, Int(x), Int(y)) => Int(x * y),
+                    (Op::Mul, Float(x), Float(y)) => Float(x * y),
+                    (Op::Div, Int(x), Int(y)) => Int(x / y),
+                    (Op::Div, Float(x), Float(y)) => Float(x / y),
+                    _ => unreachable!(),
+                };
+                self.push(result);
+            }
+            Instruction::Dsp => {
+                match self.pop() {
+                    Int(x) => print!("{:?}", x),
+                    Float(x) => print!("{:?}", x),
+                    Str(x) => print!("{}", x),
+                }
+                io::stdout().flush().unwrap();
+            }
+        };
+    }
+
+    fn dump_stack(&self) -> String {
+        format!("{:?}", self.stack)
+    }
+
+    fn dump_code(&self) -> String {
+        self.code
+            .iter()
+            .map(|x| format!("{:?}", x))
+            .collect::<Vec<String>>()
+            .join("\n")
+    }
+}
+
+fn main() {
+    let mut machine = Machine::new(vec![
+        Instruction::Push(Literal::Float(2.)),
+        Instruction::Push(Literal::Int(1)),
+        Instruction::BinaryOp(Op::Div),
+        Instruction::Push(Literal::Str("1 / 2 is ")),
+        Instruction::Dsp,
+        Instruction::Dsp,
+        Instruction::Push(Literal::Str("\n")),
+        Instruction::Dsp
+    ]);
+    println!("------------  dumped code   ------------");
+    println!("{}", machine.dump_code());
+    println!("------------ machine output ------------");
+    machine.execute();
+}

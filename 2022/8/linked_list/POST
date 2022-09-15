@@ -1,0 +1,115 @@
+> Is this code so far suitable to solve the problem?
+
+The code is pretty good for someone new to Rust. It has some flaws, though.
+
+* consistency
+
+Users are familiar with `Vec`'s interface, and may expect lists to implement a similar interface. Consistency is essential for making an interface.
+
+Let's compare both interfaces.
+
+```rust
+impl List {
+    fn new() { /* ... */ }
+    fn append(&mut self, value: u8) { /* ... */ }
+    fn get_last_element_mut(&mut self) -> &mut Self { /* ... */ }
+    fn get_last_element(&self) -> &Self { /* ... */ }
+    fn len(&self) -> usize { /* ... */ }
+    fn get_mut(&mut self, index: usize) -> &mut Self { /* ... */ }
+}
+
+impl Display for List { /* ... */ }
+impl Debug for List { /* ... */ }
+
+impl Index<usize> for List { /* ... */ }
+```
+
+```rust
+impl<T> Vec<T> {
+    fn new() { /* ... */ }
+    fn push(&mut self, value: T) { /* ... */ }
+    // (not applicable)
+    // (not applicable)
+    fn len(&self) -> usize { /* ... */ }
+    fn get(&mut self, index: usize) -> Option<&T> { /* ... */ }
+    fn get_mut(&mut self, index: usize) -> Option<&mut T> { /* ... */ }
+}
+
+impl<T> Debug for Vec<T> where T: Debug { /* ... */ }
+
+impl<T, I> Index<I> for Vec<T> where I: SliceIndex<[T]> { /* ... */ }
+```
+
+As you may notice, only `new` and `len` have the same signature in both interfaces. It's best to change other methods to reflect Vec's and avoid confusion where possible. There's also the lack of parameterization over element type in your `List`, but I suppose it's intentional, and that's also why you can keep the `Display` impl.
+
+Other trouble with the interface:
+
+* the methods `get_last_element` and `get_last_element_mut` return a reference to the list's last **node**, not the last **element** (which is a byte). We should rename them to `get_last_node` and `get_last_node_mut`.
+
+> What elements of the language should I consider to make the code more elegant?
+
+* `if let`
+
+This is a perfect place to use `if let`.
+
+Read more: Rust Book [6.3. Concise Control Flow with if let](https://doc.rust-lang.org/book/ch06-03-if-let.html).
+
+* `map_or`
+
+Using `map_or` instead of `if let` is good in `fn len` and makes our code shorter.
+
+```rust
+fn len(&self) -> usize {
+    self.next.as_ref().map_or(1, |next| 1 + next.len())
+}
+```
+
+Other suggestions
+
+You have this code that implements indexing:
+
+```rust
+fn index(&self, index: usize) -> &Self::Output {
+    if index == 0 {
+        self
+    } else {
+        &self
+            .next
+            .as_ref()
+            .expect("line should have {index} more elements")[index - 1]
+    }
+}
+```
+
+Fails with a wrong message:
+
+```
+thread 'tests::out_of_bounds' panicked at 'line should have {index} more elements', src/lib.rs:156:17
+```
+
+Above happens because you are trying to interpolate in a string literal outside of a formatting macro such as `format`, `print`, `println`, `panic`. The string literal has no such power. Use a macro instead:
+```rust
+fn index(&self, index: usize) -> &Self::Output {
+    if index == 0 {
+        self
+    } else {
+        if let Some(ref next) = self.next {
+            &next[index - 1]
+        } else {
+            panic!("list should have {index} more elements")
+        }
+    }
+}
+```
+
+Make a regression test for your error message with `should_panic(expected = "...")`:
+
+```rust
+#[test]
+#[should_panic(expected = "list should have 1 more elements")]
+fn out_of_bounds() {
+    let mut l = List::new(1);
+    l.append(2);
+    let _ = l[l.len()];
+}
+```

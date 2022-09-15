@@ -1,0 +1,48 @@
+Just put it in a local variable for brevity. That's it.
+
+```rust
+pub fn new() -> Ttt {
+    let board = ['0', '1', '2', '3', '4', '5', '6', '7', '8'];
+    Ttt {
+        board,
+        options: Ttt::create_options(board),
+        active_player: P1,
+        game_over: false,
+        winner: ' ',
+    }
+}
+```
+
+You may determine whether the game is a tie earlier, when there is one vacant square rather than with no remaining vacant squares. I leave that as a potential exercise for you.
+
+I feel like you should abandon this implementation of `options` and use `board` as the only source of info about the board.
+
+I would do `vacant_coords`.
+
+```rust
+fn vacant_coords(&self) -> impl Iterator<Item=usize> + '_ {
+    self.board.iter().enumerate().filter_map(|(i, &ch)| {
+        if ch == P1 || ch == P2 {
+            None
+        } else {
+            Some(i)
+        }
+    })
+}
+```
+
+Use that to check for number of vacant coords
+```rust
+if self.vacant_coords().count() == 0 {
+    println!("It's a tie!");
+    return true;
+}
+```
+
+Use that to check whether input is a vacant coord
+
+```rust
+if !self.vacant_coords().find(|&i| i == coord).is_some() {
+    println!("Please enter a valid selection.");
+    continue;
+}

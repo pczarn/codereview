@@ -1,0 +1,114 @@
+welcome to the Rust community!
+
+Your code is already quite idiomatic. You may use an unsafe and unstable feature to improve efficiency, `swap_unchecked`. It's only available with the nightly compiler, so make sure you enable it if you wish to try this code.
+
+```rust
+#![feature(slice_swap_unchecked)]
+
+// ...
+
+for (i, n) in nums.iter().enumerate() {
+    if n % 2 == 0 {
+        // this is safe because `even` never exceeds `res` length
+        // and `i` is an index into `even`
+        unsafe {
+            res.swap_unchecked(even, i);
+        }
+        even += 1;
+    }
+}
+```
+
+But why reinvent the wheel when `itertools` has `partition`?
+
+```rust
+use itertools::partition;
+
+// Sorts a vector, so that even numbers appear first.
+fn sort_array_by_parity(mut nums: Vec<i32>) -> Vec<i32> {
+    partition(&mut nums, |n| n % 2 == 0);
+    nums
+}
+```
+
+Itertools partition is different in that it grabs elements from the back of the array, so your even elements are placed in reverse order. Partition is implemented like this:
+
+```rust
+pub fn partition<'a, A: 'a, I, F>(iter: I, mut pred: F) -> usize
+    where I: IntoIterator<Item = &'a mut A>,
+          I::IntoIter: DoubleEndedIterator,
+          F: FnMut(&A) -> bool
+{
+    let mut split_index = 0;
+    let mut iter = iter.into_iter();
+    'main: while let Some(front) = iter.next() {
+        if !pred(front) {
+            loop {
+                match iter.next_back() {
+                    Some(back) => if pred(back) {
+                        std::mem::swap(front, back);
+                        break;
+                    },
+                    None => break 'main,
+                }
+            }
+        }
+        split_index += 1;
+    }
+    split_index
+}
+```
+
+There is one more trick we can use. The standard way to avoid bounds checks is to add iterators. But you clearly can't have two iterators here; can you? You need two mutable references simultaneously live that point into the same array, which Rust forbids.
+
+There are safe tools to overcome the restrictions of the borrow checker, though, so that you may have two live mutating iterators. Cell is “a mutable memory location” reserved for copyable data (Plain Old Data) only. Since you are restricted to only mutate copyable data, such as your i32, you cannot mess up ownership of complex data.
+
+Docs describe copyable data as "types whose values can be duplicated simply by copying bits." Copyable data is Plain Old Data such as numbers, tuples of copyable data, immutable borrow (&), pointers (*const / *mut), structs and enums that implement Copy (where all fields are necessarily Copyable).
+
+`Cell` provides us with a getter and a setter. It's simple to understand why it's safe - what's the harm in mutating the same number in two places? Where's the catch though? There is one downside to Cell - it is not Sync, so that you can cannot have data races.
+
+```rust
+// Sorts a vector, so that even numbers appear first.
+fn sort_array_by_parity(nums: Vec<i32>) -> Vec<i32> {
+    let mut res: Vec<_> = nums.into_iter().map(|n| Cell::new(n)).collect();
+    let mut even_cursor = res.iter();
+
+    for n in &res {
+        if n.get() % 2 == 0 {
+            let dest = even_cursor.next().unwrap();
+            let temp = n.get();
+            n.set(dest.get());
+            dest.set(temp);
+        }
+    }
+    
+    res.into_iter().map(|n| n.get()).collect()
+}
+```
+
+I benchmarked these functions for you. Clearly the optimizer is smart enough to optimize out the clone-alike into_iter-map-collect, even though it's not smart enough to optimize out the bounds checks. Probably the loop logic is too complex for the optimizer.
+
+In benchmarks, itertools fares the best, but if you're looking for preserving your original order of even elements, then `cell` should be your choice. And `cell` is safe and stable Rust!
+
+```
+parity-orig             time:   [27.428 ns 27.453 ns 27.484 ns]                         
+Found 6 outliers among 100 measurements (6.00%)
+  2 (2.00%) low mild
+  1 (1.00%) high mild
+  3 (3.00%) high severe
+
+parity-unsafe           time:   [26.655 ns 26.686 ns 26.719 ns]
+Found 7 outliers among 100 measurements (7.00%)
+  1 (1.00%) low mild
+  4 (4.00%) high mild
+  2 (2.00%) high severe
+
+parity-partition        time:   [13.293 ns 13.351 ns 13.410 ns]                              
+Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+
+parity-cell             time:   [16.214 ns 16.227 ns 16.244 ns]                         
+Found 8 outliers among 100 measurements (8.00%)
+  2 (2.00%) high mild
+  6 (6.00%) high severe
