@@ -2,10 +2,16 @@ extern crate diesel;
 
 mod schema;
 
+use diesel::sqlite::SqliteConnection;
+use diesel::prelude::*;
+use dotenvy::dotenv;
+use std::env;
+
 use log::warn;
 
 use diesel::prelude::*;
-use diesel::result;
+
+use schema::users;
 
 #[derive(Debug, Insertable)]
 #[diesel(table_name = users)]
@@ -14,13 +20,13 @@ struct NewUser<'a> {
 }
 
 #[derive(Queryable)]
-struct User {
+pub struct User {
     id: i32,
     email: String,
 }
 
 pub fn get_or_create_user(email: &str) -> User {
-    use crate::schema::users;
+    use diesel::result::{Error::DatabaseError, DatabaseErrorKind::UniqueViolation};
 
     let new_user = NewUser { email };
     let mut conn = get_connection();
@@ -31,48 +37,38 @@ pub fn get_or_create_user(email: &str) -> User {
 
     match result {
         Ok(user) => return user,
-        Err(err) => match err {
-            result::Error::DatabaseError(err_kind, info) => match err_kind {
-                result::DatabaseErrorKind::UniqueViolation => {
-                    warn!(
-                        "{:?} is already exists. Info: {:?}. Skipping.",
-                        new_user, info
-                    );
-                    // another query to DB to get existing user by email
-                    let user = user_by_email(new_user.email);
-                    return user;
-                }
-                _ => {
-                    panic!("Database error: {:?}", info);
-                }
-            },
-            _ => {
-                // TODO: decide how to deal with unexpected errors
-                return User {
-                    id: 0,
-                    email: "".into(),
-                };
+        Err(DatabaseError(UniqueViolation, info)) => {
+            warn!(
+                "{:?} is already exists. Info: {:?}. Skipping.",
+                new_user, info
+            );
+            // another query to DB to get existing user by email
+            user_by_email(new_user.email)
+        }
+        Err(DatabaseError(_, info)) => {
+            panic!("Database error: {:?}", info);
+        }
+        _ => {
+            // TODO: decide how to deal with unexpected errors
+            User {
+                id: 0,
+                email: "".into(),
             }
-        },
+        }
     }
 }
 
 pub fn user_by_email(user_email: &str) -> User {
-    use crate::schema::users::dsl::*;
+    use schema::users::dsl::*;
 
     let mut conn = get_connection();
 
-    let user = crate::schema::users::dsl::users
+    let user = schema::users::dsl::users
         .filter(email.eq(user_email))
         .first(&mut conn)
         .unwrap();
     return user;
 }
-
-use diesel::sqlite::SqliteConnection;
-use diesel::prelude::*;
-use dotenvy::dotenv;
-use std::env;
 
 pub fn get_connection() -> SqliteConnection {
     dotenv().ok();
@@ -83,5 +79,6 @@ pub fn get_connection() -> SqliteConnection {
 }
 
 fn main() {
-
+    get_or_create_user("example@example.com");
+    get_or_create_user("example@example.com");
 }
