@@ -51,6 +51,28 @@ pub fn with_date_and_time(
 )
 ```
 
+## public fields
+
+My recommendation is to add accessor methods and make fields private.
+
+If you want to change inner representation someday, you wouldn't need to break backwards compatibility. This is important in library code. But in binary code, you may change representation without breaking other modules, so this is beneficial as well.
+
+```rust
+pub struct Time {
+    hour: u8,
+    minute: u8,
+    second: u8
+}
+
+impl Time {
+    fn hour(&self) -> u8 {
+        self.hour
+    }
+
+    // ..
+}
+```
+
 ## `isoformat`
 
 I recommend a better method name such as `to_iso_format` or `to_rfc3339`. Name `to_rfc3339` is consistent with chrono's DateTime.
@@ -63,4 +85,4 @@ For lints, I recommend `cargo clippy`.
 
 ## github
 
-
+https://github.com/pczarn/codereview/tree/ff455cdeba86d1bdf5b7df03753fd30aa47fd3bb/2022/9/datetime
